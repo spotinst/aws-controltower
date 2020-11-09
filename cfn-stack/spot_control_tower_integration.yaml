@@ -1,0 +1,110 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Spot Integration with AWS Control Tower (MPCT-jberaste)
+
+Resources:
+  SpotControlTowerLifeCycleEvents:
+    Type: AWS::Events::Rule
+    Properties:
+      Description: Capture Control Tower LifeCycle events and trigger an action
+      EventPattern:
+        detail:
+          eventName:
+            - CreateManagedAccount
+          eventSource:
+            - controltower.amazonaws.com
+        detail-type:
+          - AWS Service Event via CloudTrail
+        source:
+          - aws.controltower
+      State: ENABLED
+      Targets:
+        - Arn: !GetAtt "SpotControlTowerLifeCycle.Arn"
+          Id: SpotControlTowerLambdaLifeCycle
+
+  SpotAWSControlTowerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Path: /
+      Policies:
+        - PolicyName: SpotAwsControlTowerPolicyList
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Sid: StackInstanceOps
+                Effect: Allow
+                Action:
+                  - cloudformation:CreateStackInstances
+                  - cloudformation:DescribeStackInstance
+                  - cloudformation:DescribeStacks
+                Resource:
+                  !Join [
+                    ":",
+                    [
+                      "arn:aws:cloudformation",
+                      !Ref "AWS::Region",
+                      !Ref "AWS::AccountId",
+                      "stackset/*:*",
+                    ],
+                  ]
+              - Sid: StackSetOps
+                Effect: Allow
+                Action:
+                  - cloudformation:CreateStackSet
+                  - cloudformation:DescribeStackSet
+                  - cloudformation:DescribeStackInstance
+                  - cloudformation:DescribeStacks
+                Resource: "*"
+              - Sid: S3Ops
+                Effect: Allow
+                Action:
+                  - s3:ListBucket
+                  - s3:GetObject
+                Resource: "arn:aws:s3:::spotinst-public/assets/cloudformation/templates/onboarding/spotinst_aws_cfn_account_credentials_stack.template.json"
+              - Sid: PassRole
+                Effect: Allow
+                Action:
+                  - iam:PassRole
+                Resource:
+                  !Join [
+                    ":",
+                    [
+                      "arn:aws:iam:",
+                      !Ref "AWS::AccountId",
+                      "role/service-role/AWSControlTowerStackSetRole",
+                    ],
+                  ]
+              - Sid: SSMOps
+                Effect: Allow
+                Action:
+                  - ssm:GetParameter
+                Resource: "arn:aws:ssm:*:*:parameter/spot-auth-token"
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - arn:aws:iam::aws:policy/service-role/AWSControlTowerServiceRolePolicy
+
+  SpotControlTowerLifeCycle:
+    Type: AWS::Lambda::Function
+    Properties:
+      Code:
+        S3Bucket: "spotinst-public"
+        S3Key: "assets/cloudformation/controltower/index.py.zip"
+      Handler: index.lambda_handler
+      MemorySize: 128
+      Role: !GetAtt "SpotAWSControlTowerRole.Arn"
+      Runtime: python3.8
+      Timeout: 900
+
+  SpotAWSControlTowerPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !GetAtt "SpotControlTowerLifeCycle.Arn"
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt "SpotControlTowerLifeCycleEvents.Arn"
