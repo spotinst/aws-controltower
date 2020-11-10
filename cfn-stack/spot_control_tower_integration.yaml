@@ -93,7 +93,7 @@ Resources:
     Type: AWS::Lambda::Function
     Properties:
       Code:
-        S3Bucket: "spotinst-public"
+        S3Bucket: !Join [".", ["spotinst-public", !Ref "AWS::Region"]]
         S3Key: "assets/cloudformation/controltower/index.py.zip"
       Handler: index.lambda_handler
       MemorySize: 128
